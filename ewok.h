@@ -22,6 +22,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifndef ewah_malloc
 #	define ewah_malloc malloc
@@ -70,6 +71,12 @@ void ewah_free(struct ewah_bitmap *bitmap);
  */
 int ewah_deserialize(struct ewah_bitmap *self, int fd);
 
+// follow ewah_deserialize, except this receive FILE* parameter
+int ewah_deserialize_fp(struct ewah_bitmap *self, FILE *fp);
+
+// follow ewah_deserialize_fp, except this receive buf and len parameter
+int ewah_deserialize_buf(struct ewah_bitmap *ewah_p, void *serializedbytes, size_t serializedsize);
+
 /**
  * Dump an existing bitmap to a file descriptor. The bitmap
  * is dumped in compressed form, with the following structure:
@@ -81,6 +88,13 @@ int ewah_deserialize(struct ewah_bitmap *self, int fd);
  * Returns: 0 on success, -1 if a writing error occured (check errno)
  */
 int ewah_serialize(struct ewah_bitmap *self, int fd);
+
+// follow ewah_serialize, except this receive FILE* parameter
+int ewah_serialize_fp(struct ewah_bitmap *self, FILE *fp);
+
+// follow ewah_serialize_fp, except this receive buf and len parameter
+// caller is responsible for free *serializedbytes
+int ewah_serialize_buf(struct ewah_bitmap *self, void **serializedbytes, size_t *serializedsize);
 
 /**
  * Logical not (bitwise negation) in-place on the bitmap
@@ -124,6 +138,8 @@ void ewah_set(struct ewah_bitmap *self, size_t i);
  * compressed bitmaps.
  */
 size_t ewah_add_empty_words(struct ewah_bitmap *self, bool v, size_t number);
+
+size_t ewah_add(struct ewah_bitmap *self, eword_t word);
 
 struct ewah_iterator {
 	const eword_t *buffer;
@@ -197,6 +213,7 @@ struct bitmap *bitmap_new(void);
 void bitmap_set(struct bitmap *self, size_t pos);
 void bitmap_clear(struct bitmap *self, size_t pos);
 bool bitmap_get(struct bitmap *self, size_t pos);
+void bitmap_free(struct bitmap *bitmap);
 
 struct ewah_bitmap * bitmap_to_ewah(struct bitmap *bitmap);
 struct bitmap *ewah_to_bitmap(struct ewah_bitmap *ewah);

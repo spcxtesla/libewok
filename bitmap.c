@@ -64,7 +64,7 @@ bool bitmap_get(struct bitmap *self, size_t pos)
 	return block < self->word_alloc && (self->words[block] & MASK(pos)) != 0;
 }
 
-struct ewah_bitmap *bitmap_compress(struct bitmap *bitmap)
+struct ewah_bitmap *bitmap_to_ewah(struct bitmap *bitmap)
 {
 	struct ewah_bitmap *ewah = ewah_new();
 	size_t i, running_empty_words = 0;

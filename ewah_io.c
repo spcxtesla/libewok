@@ -19,6 +19,7 @@
  */
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdio.h>
 
 #include "ewok.h"
 
@@ -81,6 +82,75 @@ int ewah_serialize(struct ewah_bitmap *self, int fd)
 	return 0;
 }
 
+// follow ewah_serialize(struct ewah_bitmap *self, int fd)
+int ewah_serialize_fp(struct ewah_bitmap *self, FILE *fp)
+{
+	size_t i;
+	eword_t dump[2048];
+	const size_t words_per_dump = sizeof(dump) / sizeof(eword_t);
+
+	/* 32 bit -- bit size fr the map */
+	uint32_t bitsize =  htobe32((uint32_t)self->bit_size);
+	// if (fwrite(fd, &bitsize, 4) != 4)
+	if (fwrite(&bitsize, sizeof(bitsize), 1, fp) != 1)
+		return -1;
+
+	/** 32 bit -- number of compressed 64-bit words */
+	uint32_t word_count =  htobe32((uint32_t)self->buffer_size);
+	// if (write(fd, &word_count, 4) != 4)
+	if (fwrite(&word_count, sizeof(word_count), 1, fp) != 1)
+		return -1;
+
+	/** 64 bit x N -- compressed words */
+	const eword_t *buffer = self->buffer;
+	size_t words_left = self->buffer_size;
+
+	while (words_left >= words_per_dump) {
+		for (i = 0; i < words_per_dump; ++i, ++buffer)
+			dump[i] = htobe64(*buffer);
+
+		// if (write(fd, dump, sizeof(dump)) != sizeof(dump))
+		if (fwrite(dump, sizeof(dump), 1, fp) != 1)
+			return -1;
+
+		words_left -= words_per_dump;
+	}
+
+	if (words_left) {
+		for (i = 0; i < words_left; ++i, ++buffer)
+			dump[i] = htobe64(*buffer);
+
+		// if (write(fd, dump, words_left * 8) != words_left * 8)
+		if (fwrite(dump, words_left * 8, 1, fp) != 1)
+			return -1;
+	}
+
+	/** 32 bit -- position for the RLW */
+	uint32_t rlw_pos = (uint8_t*)self->rlw - (uint8_t *)self->buffer;
+	rlw_pos = htobe32(rlw_pos / sizeof(eword_t));
+
+	// if (write(fd, &rlw_pos, 4) != 4)
+	if (fwrite(&rlw_pos, sizeof(rlw_pos), 1, fp) != 1)
+		return -1;
+
+	return 0;
+}
+
+// follow ewah_serialize_fp(struct ewah_bitmap *self, FILE *fp)
+// caller is responsible for free *serializedbytes
+int ewah_serialize_buf(struct ewah_bitmap *self, void **serializedbytes, size_t *serializedsize)
+{
+    FILE *fp = open_memstream((char**)serializedbytes, serializedsize);
+	if (fp == NULL)
+		return -1;
+
+    int status = ewah_serialize_fp(self, fp);
+
+    // fflush(fp);
+	fclose(fp);
+	return status;
+}
+
 int ewah_deserialize(struct ewah_bitmap *self, int fd)
 {
 	size_t i;
@@ -135,4 +205,80 @@ int ewah_deserialize(struct ewah_bitmap *self, int fd)
 	self->rlw = self->buffer + be32toh(rlw_pos);
 
 	return 0;
+}
+
+
+// follow ewah_deserialize(struct ewah_bitmap *self, int fd)
+int ewah_deserialize_fp(struct ewah_bitmap *self, FILE *fp)
+{
+	size_t i;
+	eword_t dump[2048];
+	const size_t words_per_dump = sizeof(dump) / sizeof(eword_t);
+
+	/* 32 bit -- bit size fr the map */
+	uint32_t bitsize;
+	// if (read(fd, &bitsize, 4) != 4)
+	if (fread(&bitsize, sizeof(bitsize), 1, fp) != 1)
+		return -1;
+
+	self->bit_size = (size_t)be32toh(bitsize);
+
+	/** 32 bit -- number of compressed 64-bit words */
+	uint32_t word_count;
+	// if (read(fd, &word_count, 4) != 4)
+	if (fread(&word_count, sizeof(word_count), 1, fp) != 1)
+		return -1;
+
+	self->buffer_size = (size_t)be32toh(word_count);
+	self->buffer = ewah_realloc(self->buffer, self->buffer_size * sizeof(eword_t));
+
+	if (!self->buffer)
+		return -1;
+
+	/** 64 bit x N -- compressed words */
+	eword_t *buffer = self->buffer;
+	size_t words_left = self->buffer_size;
+
+	while (words_left >= words_per_dump) {
+		// if (read(fd, dump, sizeof(dump)) != sizeof(dump))
+		if (fread(dump, sizeof(dump), 1, fp) != 1)
+			return -1;
+
+		for (i = 0; i < words_per_dump; ++i, ++buffer)
+			*buffer = be64toh(dump[i]);
+
+		words_left -= words_per_dump;
+	}
+
+	if (words_left) {
+		// if (read(fd, dump, words_left * 8) != words_left * 8)
+		if (fread(dump, words_left * 8, 1, fp) != 1)
+			return -1;
+
+		for (i = 0; i < words_left; ++i, ++buffer)
+			*buffer = be64toh(dump[i]);
+	}
+
+	/** 32 bit -- position for the RLW */
+	uint32_t rlw_pos;
+	// if (read(fd, &rlw_pos, 4) != 4)
+	if (fread(&rlw_pos, sizeof(rlw_pos), 1, fp) != 1)
+		return -1;
+
+	self->rlw = self->buffer + be32toh(rlw_pos);
+
+	return 0;
+}
+
+// follow ewah_deserialize_fp(struct ewah_bitmap *self, FILE *fp)
+int ewah_deserialize_buf(struct ewah_bitmap *ewah_p, void *serializedbytes, size_t serializedsize)
+{
+    FILE *fp = fmemopen(serializedbytes, serializedsize, "rb");
+    if (fp == NULL)
+		return -1;
+
+    int status = ewah_deserialize_fp(ewah_p, fp);
+
+	fclose(fp);
+	return status;
 }
